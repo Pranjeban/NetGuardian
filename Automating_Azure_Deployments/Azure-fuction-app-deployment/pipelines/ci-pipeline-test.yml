@@ -1,0 +1,32 @@
+- task: PowerShell@2
+  name: TriggerRelease
+  inputs:
+    targetType: 'inline'
+    script: |
+      $pat = "$(System.AccessToken)"
+      $headers = @{
+        Authorization = "Bearer $pat"
+        "Content-Type" = "application/json"
+      }
+
+      $body = @{
+        definitionId = 12
+        description = "Triggered from CI for Function App"
+        isDraft = $false
+        artifacts = @(
+          @{
+            alias = "_Azure_Master_Build"
+            instanceReference = @{
+              id = "$(Build.BuildId)"
+              name = "$(Build.BuildNumber)"
+            }
+          }
+        )
+        variables = @{
+          FUNCTION_NAME = @{ value = "$(FUNCTION_NAME)" }
+          TARGET_ENV = @{ value = "$(TARGET_ENV)" }
+        }
+      } | ConvertTo-Json -Depth 10
+
+      $url = "$(System.CollectionUri)$(System.TeamProject)/_apis/release/releases?api-version=7.0"
+      Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body

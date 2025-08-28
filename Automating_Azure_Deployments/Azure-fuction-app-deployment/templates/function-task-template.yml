@@ -1,0 +1,15 @@
+parameters:
+  azureSubscription: ''
+  location: 'East US'
+
+steps:
+  - task: AzureCLI@2
+    name: ManageFunctionApps
+    inputs:
+      azureSubscription: ${{ parameters.azureSubscription }}
+      scriptType: 'ps'
+      scriptLocation: 'scriptPath'
+      scriptPath: 'scripts/manage-function-app.ps1'
+      arguments: >
+        -Location '${{ parameters.location }}'
+    displayName: 'Manage Function Apps from PR'

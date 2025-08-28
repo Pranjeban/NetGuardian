@@ -1,0 +1,21 @@
+trigger: none
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  azureSubscription: 'Azure-Service-Connection'
+  resourceGroup: 'resourceGroup'
+  region: 'region-name'
+
+steps:
+  - download: current
+    artifact: drop
+
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: $(azureSubscription)
+      scriptType: 'ps'
+      scriptLocation: 'scriptPath'
+      scriptPath: 'scripts/manage-function-app.ps1'
+      arguments: '-FunctionApp "$(FUNCTION_NAME)"'

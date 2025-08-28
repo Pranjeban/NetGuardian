@@ -1,0 +1,64 @@
+#Triggered pipelines when PR is raised in the main branch only
+
+#This will ensure for no automatic triggers
+trigger: none
+
+#Ensuring only triggers when code is pushed to main branch 
+pr:
+  branches:
+    include:
+      - main
+
+#Host -> Latest windows image
+pool:
+  vmImage: 'windows-latest'
+
+#This will hold the Fuction App name
+variables:
+  FUNCTION_NAME: ''
+
+#
+steps:
+  - task: PowerShell@2
+    name: ExtractFunctionApp
+    inputs:
+      targetType: 'inline'
+      script: |
+        #This is to fetch the PRID
+        $prId = "$(System.PullRequest.PullRequestId)" 
+
+        #This is to fetch the repo
+        $repo = "$(Build.Repository.Name)"
+
+        #Will fetch the org url 
+        $orgUrl = "$(System.CollectionUri)"
+        
+        #Current project 
+        $project = "$(System.TeamProject)"
+
+        Write-Host "Fetching PR description..."
+        $token = "$(System.AccessToken)"
+        $headers = @{Authorization = "Bearer $token"}
+
+        # Example will be https://dev.azure.com/lxkit/D365/_git/D365/pullrequest/5208 --> This is just Normal Example
+        # https://lxkit.visualstudio.com/D365/_git/EBAFO_CodeSolutions/pullrequest/5754 --> This example is specific to the org
+        $url = "$orgUrl$project/_apis/git/repositories/$repo/pullRequests/$prId?api-version=7.0"
+
+        #GET request fetch PR
+        $response = Invoke-RestMethod -Uri $url -Headers $headers -Method Get
+
+        #This will fetch the PR description
+        $description = $response.description
+
+        # This is for testing if the fuction app is present in PR for not
+        if ($description -match 'Function App\s*-\s*"(.+?)"') {
+          $functionAppName = $matches[1]
+          Write-Host "##vso[task.setvariable variable=FUNCTION_NAME]$functionAppName"
+          Write-Host "Function App: $functionAppName"
+        } else {
+          Write-Error "Function App name not found in PR description!"
+          exit 1
+        }
+
+  - publish: $(Pipeline.Workspace)
+    artifact: drop

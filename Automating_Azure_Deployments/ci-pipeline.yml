@@ -1,0 +1,125 @@
+trigger: none
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  FUNCTION_NAME: ''
+  ENVIRONMENTS: ''
+
+steps:
+# Extract Function App name and Env from PR description
+- task: PowerShell@2
+  displayName: "Extract FunctionApp and Environment from PR"
+  inputs:
+    targetType: inline
+    script: |
+      $token = "$(System.AccessToken)"
+      $prId = "$(System.PullRequest.PullRequestId)"
+      $repo = "$(Build.Repository.Name)"
+      $orgUrl = "$(System.CollectionUri)"
+      $project = "$(System.TeamProject)"
+      $headers = @{Authorization = "Bearer $token"}
+      $url = "$orgUrl$project/_apis/git/repositories/$repo/pullRequests/$prId?api-version=7.0"
+
+      Write-Host "Fetching PR details..."
+      $response = Invoke-RestMethod -Uri $url -Headers $headers -Method Get
+      $description = $response.description
+
+      if ($description -match 'Function App\s*-\s*"(.+?)"') {
+        Write-Host "##vso[task.setvariable variable=FUNCTION_NAME]$($matches[1])"
+      } else {
+        Write-Error "Function App not found in PR!"
+        exit 1
+      }
+
+      if ($description -match 'Env\s*-\s*"(.+?)"') {
+        Write-Host "##vso[task.setvariable variable=ENVIRONMENTS]$($matches[1])"
+      } else {
+        Write-Error "Environment not found in PR!"
+        exit 1
+      }
+
+# Wait for any ongoing Azure_build_pipelines build to finish
+- task: PowerShell@2
+  displayName: "Wait for ongoing builds to finish"
+  inputs:
+    targetType: inline
+    script: |
+      $token = "$(System.AccessToken)"
+      $headers = @{Authorization = "Bearer $token"}
+      $orgUrl = "$(System.CollectionUri)"
+      $project = "$(System.TeamProject)"
+      $buildDefName = "Azure_build_pipelines"
+
+      do {
+        $builds = Invoke-RestMethod -Uri "$orgUrl$project/_apis/build/builds?definitions=$buildDefName&statusFilter=inProgress&api-version=7.0" -Headers $headers
+        if ($builds.count -gt 0) {
+          Write-Host "Build in progress... waiting 60 seconds"
+          Start-Sleep -Seconds 60
+        }
+      } while ($builds.count -gt 0)
+
+# Enable matching agent in release pipeline (via variable)
+- task: PowerShell@2
+  displayName: "Enable matching agent in Release pipeline"
+  inputs:
+    targetType: inline
+    script: |
+      $functionApp = "$(FUNCTION_NAME)"
+      Write-Host "Enabling agent for $functionApp..."
+      # This depends on how you manage 'enable' in your release definition — likely updating variable runStage = true for that task
+      # Sample API call to update release definition variable can go here
+
+# Enable Azure Function App
+- task: AzureCLI@2
+  displayName: "Enable Azure Function App"
+  inputs:
+    azureSubscription: "Your-Service-Connection"
+    scriptType: ps
+    scriptLocation: inlineScript
+    inlineScript: |
+      $envs = "$(ENVIRONMENTS)".Split(",")
+      foreach ($env in $envs) {
+        az functionapp start --name "$(FUNCTION_NAME)-$env" --resource-group "RG-$env"
+      }
+
+# Trigger Release for each environment
+- task: PowerShell@2
+  displayName: "Trigger Azure_build_pipelines Release"
+  inputs:
+    targetType: inline
+    script: |
+      $token = "$(System.AccessToken)"
+      $headers = @{
+        Authorization = "Bearer $token"
+        "Content-Type" = "application/json"
+      }
+      $orgUrl = "$(System.CollectionUri)"
+      $project = "$(System.TeamProject)"
+      $envs = "$(ENVIRONMENTS)".Split(",")
+
+      foreach ($env in $envs) {
+        $body = @{
+          definitionId = <YourReleaseDefinitionId>
+          description = "Automated deployment for $(FUNCTION_NAME) to $env"
+          isDraft = $false
+          reason = "manual"
+          manualEnvironments = @($env)
+        } | ConvertTo-Json -Depth 10
+
+        Invoke-RestMethod -Uri "$orgUrl$project/_apis/release/releases?api-version=7.0" -Headers $headers -Method Post -Body $body
+      }
+
+# Send Email Notification
+- task: PowerShell@2
+  displayName: "Send Email Notification"
+  inputs:
+    targetType: inline
+    script: |
+      # This is where you'd integrate with SendGrid, SMTP, or O365 Graph API
+      Write-Host "Sending deployment success/failure email..."
